@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portfolio Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body style="font-family: Arial, sans-serif; margin: 24px; max-width: 900px;">
+  <h1 style="margin-bottom: 16px;">Portfolio Risk Analyzer</h1>
+
+  <form id="analysis-form" style="display: grid; gap: 12px; max-width: 420px; margin-bottom: 24px;">
+    <div>
+      <label for="assets" style="display: block; margin-bottom: 6px;">Assets</label>
+      <input id="assets" name="assets" type="text" placeholder="AAPL, AMZN" style="width: 100%; padding: 10px; box-sizing: border-box;">
+    </div>
+    <div>
+      <label for="capital" style="display: block; margin-bottom: 6px;">Initial Capital</label>
+      <input id="capital" name="capital" type="number" step="0.01" placeholder="10000" style="width: 100%; padding: 10px; box-sizing: border-box;">
+    </div>
+    <div>
+      <label for="benchmark" style="display: block; margin-bottom: 6px;">Benchmark ticker (optional, e.g. ^GSPC or XU100.IS)</label>
+      <input id="benchmark" name="benchmark" type="text" placeholder="^GSPC" style="width: 100%; padding: 10px; box-sizing: border-box;">
+    </div>
+    <button type="submit" style="padding: 10px 14px; cursor: pointer;">Analyze</button>
+  </form>
+
+  <section>
+    <h2 style="margin-bottom: 12px;">Results</h2>
+    <ul id="results" style="line-height: 1.7; padding-left: 20px;">
+      <li>Awaiting analysis.</li>
+    </ul>
+  </section>
+
+  <section style="margin-top: 24px;">
+    <h2 style="margin-bottom: 12px;">Benchmark Comparison</h2>
+    <div id="benchmark-container" style="overflow-x: auto;"></div>
+  </section>
+
+  <section style="margin-top: 24px;">
+    <h2 style="margin-bottom: 12px;">Covariance Matrix</h2>
+    <div id="covariance-container" style="overflow-x: auto;"></div>
+  </section>
+
+  <section style="margin-top: 24px;">
+    <h2 style="margin-bottom: 12px;">Final Values Distribution</h2>
+    <div style="height: 400px; position: relative; width: 100%; max-width: 900px; border: 1px solid #ddd; border-radius: 8px; padding: 8px; box-sizing: border-box;">
+      <canvas id="distribution-chart" style="width: 100%; height: 100%; display: block;"></canvas>
+    </div>
+  </section>
+
+  <section style="margin-top: 24px;">
+    <h2 style="margin-bottom: 12px;">Efficient Frontier</h2>
+    <div style="height: 400px; position: relative; width: 100%; max-width: 900px; border: 1px solid #ddd; border-radius: 8px; padding: 8px; box-sizing: border-box;">
+      <canvas id="frontier-chart" style="width: 100%; height: 100%; display: block;"></canvas>
+    </div>
+  </section>
+
+  <script>
+    const form = document.getElementById('analysis-form');
+    const results = document.getElementById('results');
+    const benchmarkContainer = document.getElementById('benchmark-container');
+    const covarianceContainer = document.getElementById('covariance-container');
+    const distributionCanvas = document.getElementById('distribution-chart');
+    const frontierCanvas = document.getElementById('frontier-chart');
+    let distributionChart = null;
+    let frontierChart = null;
+
+    function formatValue(value) {
+      if (value === null || value === undefined) {
+        return 'N/A';
+      }
+
+      if (typeof value === 'number') {
+        return Number.isFinite(value) ? value.toFixed(4) : 'N/A';
+      }
+
+      if (Array.isArray(value)) {
+        return value.join(', ');
+      }
+
+      if (typeof value === 'object') {
+        return JSON.stringify(value);
+      }
+
+      return String(value);
+    }
+
+    function renderResults(data) {
+      results.innerHTML = '';
+
+      const scalarItems = [
+        ['Portfolio risk', data.portfolio_risk],
+        ['Sharpe ratio', data.sharpe_ratio],
+        ['Max drawdown', data.max_drawdown],
+        ['VaR', data.var],
+        ['CVaR', data.cvar],
+        ['Win probability', data.win_probability],
+      ];
+
+      const meanReturns = data.mean_returns || {};
+      Object.entries(meanReturns).forEach(([assetName, returnValue]) => {
+        const li = document.createElement('li');
+        li.textContent = `${assetName}: ${formatValue(returnValue)}`;
+        results.appendChild(li);
+      });
+
+      scalarItems.forEach(([label, value]) => {
+        const li = document.createElement('li');
+        li.textContent = `${label}: ${formatValue(value)}`;
+        results.appendChild(li);
+      });
+
+      const annualizedRisks = data.annualized_risks || {};
+      Object.entries(annualizedRisks).forEach(([assetName, riskValue]) => {
+        const li = document.createElement('li');
+        li.textContent = `${assetName}: ${formatValue(riskValue)}`;
+        results.appendChild(li);
+      });
+    }
+
+    function renderBenchmarkComparison(comparison) {
+      benchmarkContainer.innerHTML = '';
+
+      if (!comparison || typeof comparison !== 'object') {
+        benchmarkContainer.innerHTML = '<p style="margin: 0;">No benchmark comparison available.</p>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.style.borderCollapse = 'collapse';
+      table.style.width = '100%';
+      table.style.minWidth = '520px';
+
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+
+      const blankHeader = document.createElement('th');
+      blankHeader.textContent = '';
+      blankHeader.style.border = '1px solid #ccc';
+      blankHeader.style.padding = '8px';
+      blankHeader.style.textAlign = 'left';
+      headerRow.appendChild(blankHeader);
+
+      ['Portfolio', 'Benchmark'].forEach((label) => {
+        const th = document.createElement('th');
+        th.textContent = label;
+        th.style.border = '1px solid #ccc';
+        th.style.padding = '8px';
+        th.style.textAlign = 'left';
+        headerRow.appendChild(th);
+      });
+
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const bodyRows = [
+        ['Annualized Return', comparison.portfolio_return, comparison.benchmark_return],
+        ['Sharpe Ratio', comparison.portfolio_sharpe, comparison.benchmark_sharpe],
+        ['Beta', comparison.beta, null],
+      ];
+
+      const tbody = document.createElement('tbody');
+      bodyRows.forEach(([label, portfolioValue, benchmarkValue]) => {
+        const row = document.createElement('tr');
+
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = label;
+        rowHeader.style.border = '1px solid #ccc';
+        rowHeader.style.padding = '8px';
+        rowHeader.style.textAlign = 'left';
+        rowHeader.style.fontWeight = 'normal';
+        row.appendChild(rowHeader);
+
+        [portfolioValue, benchmarkValue].forEach((value) => {
+          const cell = document.createElement('td');
+          cell.textContent = value === null || value === undefined ? 'N/A' : Number(value).toFixed(4);
+          cell.style.border = '1px solid #ccc';
+          cell.style.padding = '8px';
+          cell.style.textAlign = 'right';
+          row.appendChild(cell);
+        });
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      benchmarkContainer.appendChild(table);
+    }
+
+    function renderCovarianceMatrix(matrix) {
+      covarianceContainer.innerHTML = '';
+
+      const assets = Object.keys(matrix || {});
+      if (!assets.length) {
+        covarianceContainer.innerHTML = '<p style="margin: 0;">No covariance matrix available.</p>';
+        return;
+      }
+
+      const table = document.createElement('table');
+      table.style.borderCollapse = 'collapse';
+      table.style.width = '100%';
+      table.style.minWidth = '520px';
+
+      const thead = document.createElement('thead');
+      const headerRow = document.createElement('tr');
+
+      const corner = document.createElement('th');
+      corner.textContent = '';
+      corner.style.border = '1px solid #ccc';
+      corner.style.padding = '8px';
+      corner.style.textAlign = 'left';
+      headerRow.appendChild(corner);
+
+      assets.forEach((asset) => {
+        const th = document.createElement('th');
+        th.textContent = asset;
+        th.style.border = '1px solid #ccc';
+        th.style.padding = '8px';
+        th.style.textAlign = 'left';
+        headerRow.appendChild(th);
+      });
+
+      thead.appendChild(headerRow);
+      table.appendChild(thead);
+
+      const tbody = document.createElement('tbody');
+
+      assets.forEach((rowAsset) => {
+        const row = document.createElement('tr');
+
+        const rowHeader = document.createElement('th');
+        rowHeader.textContent = rowAsset;
+        rowHeader.style.border = '1px solid #ccc';
+        rowHeader.style.padding = '8px';
+        rowHeader.style.textAlign = 'left';
+        rowHeader.style.fontWeight = 'normal';
+        row.appendChild(rowHeader);
+
+        assets.forEach((colAsset) => {
+          const cell = document.createElement('td');
+          const value = matrix[rowAsset] && matrix[rowAsset][colAsset];
+          cell.textContent = Number.isFinite(Number(value)) ? Number(value).toFixed(6) : 'N/A';
+          cell.style.border = '1px solid #ccc';
+          cell.style.padding = '8px';
+          cell.style.textAlign = 'right';
+          row.appendChild(cell);
+        });
+
+        tbody.appendChild(row);
+      });
+
+      table.appendChild(tbody);
+      covarianceContainer.appendChild(table);
+    }
+
+    function buildBins(values, bucketCount) {
+      if (!values.length) {
+        return { labels: [], counts: [] };
+      }
+
+      const minValue = Math.min(...values);
+      const maxValue = Math.max(...values);
+
+      if (minValue === maxValue) {
+        return {
+          labels: [`${minValue.toFixed(2)} - ${maxValue.toFixed(2)}`],
+          counts: [values.length],
+        };
+      }
+
+      const bucketSize = (maxValue - minValue) / bucketCount;
+      const counts = Array.from({ length: bucketCount }, () => 0);
+
+      values.forEach((value) => {
+        const bucketIndex = Math.min(
+          bucketCount - 1,
+          Math.floor((value - minValue) / bucketSize)
+        );
+        counts[bucketIndex] += 1;
+      });
+
+      const labels = counts.map((_, index) => {
+        const start = minValue + index * bucketSize;
+        const end = start + bucketSize;
+        return `${start.toFixed(2)} - ${end.toFixed(2)}`;
+      });
+
+      return { labels, counts };
+    }
+
+    function renderDistributionChart(finalValues) {
+      const values = Array.isArray(finalValues) ? finalValues.map(Number).filter(Number.isFinite) : [];
+      const { labels, counts } = buildBins(values, 20);
+
+      if (distributionChart) {
+        distributionChart.destroy();
+      }
+
+      if (!values.length || typeof Chart === 'undefined') {
+        return;
+      }
+
+      distributionChart = new Chart(distributionCanvas, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Monte Carlo Final Values',
+            data: counts,
+            backgroundColor: 'rgba(54, 162, 235, 0.7)',
+            borderColor: 'rgba(54, 162, 235, 1)',
+            borderWidth: 1,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+            },
+          },
+          scales: {
+            x: {
+              ticks: {
+                maxRotation: 45,
+                minRotation: 45,
+              },
+            },
+            y: {
+              beginAtZero: true,
+              title: {
+                display: true,
+                text: 'Count',
+              },
+            },
+          },
+        },
+      });
+    }
+
+    function renderFrontierChart(data) {
+      const frontierRisks = Array.isArray(data.frontier_risks) ? data.frontier_risks.map(Number).filter(Number.isFinite) : [];
+      const frontierReturns = Array.isArray(data.frontier_returns) ? data.frontier_returns.map(Number).filter(Number.isFinite) : [];
+
+      if (frontierChart) {
+        frontierChart.destroy();
+      }
+
+      if (!frontierRisks.length || !frontierReturns.length || frontierRisks.length !== frontierReturns.length || typeof Chart === 'undefined') {
+        return;
+      }
+
+      const frontierPoints = frontierRisks.map((risk, index) => ({ x: risk, y: frontierReturns[index] }));
+      const currentRisk = Number(data.current_risk);
+      const currentReturn = Number(data.current_return);
+      const hasCurrentPoint = Number.isFinite(currentRisk) && Number.isFinite(currentReturn);
+
+      const datasets = [
+        {
+          label: 'Efficient Frontier',
+          data: frontierPoints,
+          showLine: true,
+          borderColor: 'rgba(16, 185, 129, 1)',
+          backgroundColor: 'rgba(16, 185, 129, 0.2)',
+          pointRadius: 3,
+          pointHoverRadius: 4,
+          tension: 0,
+        },
+      ];
+
+      if (hasCurrentPoint) {
+        datasets.push({
+          label: 'Current Portfolio',
+          data: [{ x: currentRisk, y: currentReturn }],
+          showLine: false,
+          backgroundColor: 'rgba(239, 68, 68, 1)',
+          borderColor: 'rgba(239, 68, 68, 1)',
+          pointRadius: 6,
+          pointHoverRadius: 8,
+        });
+      }
+
+      frontierChart = new Chart(frontierCanvas, {
+        type: 'scatter',
+        data: {
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: true,
+            },
+          },
+          scales: {
+            x: {
+              title: {
+                display: true,
+                text: 'Annualized Risk',
+              },
+            },
+            y: {
+              title: {
+                display: true,
+                text: 'Annualized Return',
+              },
+            },
+          },
+        },
+      });
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const assets = document.getElementById('assets').value;
+      const capital = Number(document.getElementById('capital').value);
+      const benchmark = document.getElementById('benchmark').value.trim();
+
+      const payload = { assets, capital };
+      if (benchmark) {
+        payload.benchmark = benchmark;
+      }
+
+      try {
+        const response = await fetch('/analyze', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Request failed');
+        }
+
+        renderResults(data);
+        renderBenchmarkComparison(data.benchmark_comparison);
+        renderCovarianceMatrix(data.covariance_matrix);
+        renderDistributionChart(data.final_values || data.final_simulation_values || []);
+        renderFrontierChart(data);
+      } catch (error) {
+        results.innerHTML = `<li>${error.message}</li>`;
+        benchmarkContainer.innerHTML = '';
+        covarianceContainer.innerHTML = '';
+        if (distributionChart) {
+          distributionChart.destroy();
+          distributionChart = null;
+        }
+        if (frontierChart) {
+          frontierChart.destroy();
+          frontierChart = null;
+        }
+      }
+    });
+  </script>
+</body>
+</html>
