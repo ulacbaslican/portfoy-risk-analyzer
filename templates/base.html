@@ -27,6 +27,47 @@
       color: var(--text);
     }
 
+    .top-nav {
+      background: rgba(255, 255, 255, 0.82);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+
+    .top-nav-inner {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 14px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .nav-links a {
+      text-decoration: none;
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .nav-links a:hover {
+      border-color: var(--border);
+      background: #fff;
+    }
+
+    .nav-user {
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
     .page-shell {
       max-width: 1100px;
       margin: 0 auto;
@@ -47,6 +88,24 @@
   {% block head %}{% endblock %}
 </head>
 <body>
+  <header class="top-nav">
+    <div class="top-nav-inner">
+      {% if current_user.is_authenticated %}
+      <nav class="nav-links">
+        <a href="/dashboard">Dashboard</a>
+        <a href="/">Analyze</a>
+        <a href="/logout">Logout</a>
+      </nav>
+      <div class="nav-user">{{ current_user.email }}</div>
+      {% else %}
+      <nav class="nav-links">
+        <a href="/login">Login</a>
+        <a href="/register">Register</a>
+      </nav>
+      <div class="nav-user">Please sign in</div>
+      {% endif %}
+    </div>
+  </header>
   <div class="page-shell">
     {% block content %}{% endblock %}
   </div>

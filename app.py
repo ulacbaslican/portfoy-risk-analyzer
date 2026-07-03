@@ -1,6 +1,6 @@
 import json
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 from flask_login import LoginManager, current_user, login_required
 
 from auth import auth_bp
@@ -71,6 +71,9 @@ def _portfolio_drawdown(portfolio_matrix):
 
 @app.route("/", methods=["GET"])
 def index():
+    if not current_user.is_authenticated:
+        return redirect(url_for("auth.login"))
+
     return render_template("index.html")
 
 
