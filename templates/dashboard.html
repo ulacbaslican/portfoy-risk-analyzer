@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard | Portfolio Analyzer{% endblock %}
+
+{% block content %}
+<section class="card" style="padding: 28px;">
+  <div style="display: flex; flex-wrap: wrap; gap: 16px; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+    <div>
+      <p style="margin: 0 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 0.82rem;">Dashboard</p>
+      <h1 style="margin: 0; font-size: 2rem; line-height: 1.2;">Welcome, {{ current_user.email }}</h1>
+    </div>
+    <a href="/" style="display: inline-block; padding: 12px 18px; border-radius: 999px; background: var(--accent); color: #fff; text-decoration: none; font-weight: 700;">New Analysis</a>
+  </div>
+
+  <div style="overflow-x: auto;">
+    <table style="width: 100%; border-collapse: collapse; min-width: 760px;">
+      <thead>
+        <tr>
+          <th style="text-align: left; padding: 12px; border-bottom: 2px solid var(--border);">Date</th>
+          <th style="text-align: left; padding: 12px; border-bottom: 2px solid var(--border);">Assets</th>
+          <th style="text-align: right; padding: 12px; border-bottom: 2px solid var(--border);">Capital</th>
+          <th style="text-align: right; padding: 12px; border-bottom: 2px solid var(--border);">Sharpe Ratio</th>
+          <th style="text-align: right; padding: 12px; border-bottom: 2px solid var(--border);">Win Probability</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for analysis in analyses %}
+        <tr>
+          <td style="padding: 12px; border-bottom: 1px solid var(--border);">
+            {{ analysis.date.strftime('%Y-%m-%d %H:%M') if analysis.date else 'N/A' }}
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid var(--border);">{{ analysis.assets }}</td>
+          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: right;">{{ '%.2f'|format(analysis.capital) }}</td>
+          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: right;">
+            {{ '%.4f'|format(analysis.sharpe_ratio) if analysis.sharpe_ratio is not none else 'N/A' }}
+          </td>
+          <td style="padding: 12px; border-bottom: 1px solid var(--border); text-align: right;">
+            {{ '%.4f'|format(analysis.win_probability) if analysis.win_probability is not none else 'N/A' }}
+          </td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5" style="padding: 18px 12px; color: var(--muted);">No analyses yet.</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

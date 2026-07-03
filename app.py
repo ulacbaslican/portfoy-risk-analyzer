@@ -1,4 +1,11 @@
+import json
+
 from flask import Flask, jsonify, render_template, request
+from flask_login import LoginManager, current_user, login_required
+
+from auth import auth_bp
+from db import db
+from models import Analysis, User
 
 from config import (
     DEFAULT_CONFIDENCE,
@@ -24,6 +31,23 @@ from risk_engine import (
 
 
 app = Flask(__name__)
+app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///portfoy.db"
+app.config["SECRET_KEY"] = "change-this-in-production"
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+db.init_app(app)
+
+login_manager = LoginManager()
+login_manager.login_view = "auth.login"
+login_manager.init_app(app)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+
+app.register_blueprint(auth_bp)
 
 
 def _parse_assets(assets_value):
@@ -51,6 +75,7 @@ def index():
 
 
 @app.route("/analyze", methods=["POST"])
+@login_required
 def analyze():
     try:
         payload = request.get_json(silent=True) or {}
@@ -132,6 +157,15 @@ def analyze():
             except Exception:
                 pass
 
+        analysis = Analysis(
+            user_id=current_user.id,
+            assets=payload.get("assets", ""),
+            capital=capital,
+            results_json=json.dumps(response),
+        )
+        db.session.add(analysis)
+        db.session.commit()
+
         return jsonify(response), 200
 
     except Exception as exc:
@@ -139,4 +173,6 @@ def analyze():
 
 
 if __name__ == "__main__":
+    with app.app_context():
+        db.create_all()
     app.run(debug=True)
